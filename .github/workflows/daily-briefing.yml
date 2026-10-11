@@ -1,0 +1,47 @@
+name: Daily news briefing
+
+on:
+  schedule:
+    # GitHub cron is UTC-only. These two times cover 7:45 AM Eastern in both
+    # EDT (11:45 UTC) and EST (12:45 UTC); the guard step below skips whichever
+    # one isn't 7 AM in New York. Scheduled runs often start 5-20 minutes late,
+    # so the email lands around 8 AM.
+    - cron: "45 11 * * *"
+    - cron: "45 12 * * *"
+  workflow_dispatch: # "Run workflow" button for sending one on demand
+
+jobs:
+  briefing:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Only run at 7 AM Eastern
+        id: guard
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "$(TZ=America/New_York date +%H)" = "07" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Not 7 AM in New York; skipping this trigger."
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.guard.outputs.run == 'true'
+
+      - uses: actions/setup-python@v5
+        if: steps.guard.outputs.run == 'true'
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        if: steps.guard.outputs.run == 'true'
+        run: pip install -r requirements.txt
+
+      - name: Build and send briefing
+        if: steps.guard.outputs.run == 'true'
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}
+        run: python news_briefing.py
